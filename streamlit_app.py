@@ -186,13 +186,13 @@ html_code = """
         
         <div class="mechanism">
             <h3>🔄 Fee Flow Mechanism</h3>
-            <h5>Depending on whether it is Gross or Net, the calculator will work on the Excel file accordingly to generate the final net value</h5>
             <ul class="grid-list">
-                <li><b>Master Fund Gross</b>: Raw performance</li>
-                <li><b>Subtract Mgmt Fee</b>: AXSA Net result</li>
-                <li><b>Hurdle Check</b>: Must exceed benchmark</li>
-                <li><b>Carry Applied</b>: Fee on excess return</li>
-                <li style="grid-column: span 1;"><b>Actual Net</b>: Final distribution</li>
+                <li><b>Management Fee %</b>: Annual fee on AUM</li>
+                <li><b>Management Fee Frequency</b>: How often management fee is charged</li>
+                <li><b>Carry %</b>: Performance fee on profits</li>
+                <li><b>Performance Fee Frequency</b>: How often carry is calculated</li>
+                <li><b>Hurdle Rate %</b>: Minimum return threshold before performance fees apply</li>
+                <li><b>High Water Mark</b>: Benchmark for performance fees</li>
             </ul>
         </div>
     </div>
