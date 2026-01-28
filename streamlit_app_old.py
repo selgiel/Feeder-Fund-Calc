@@ -4,7 +4,7 @@ import io
 import numpy as np
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="Investment Fund Calculator", layout="wide")
+st.set_page_config(page_title="FoF Calculator", layout="wide")
 
 st.title("Investment Fund Fee Calculator")
 
@@ -170,7 +170,7 @@ html_code = """
     <div class="container">
         <div class="flowchart">
             <div class="box master">
-                <div class="title">📈 Master Fund</div>
+                <div class="title">📈 Master Fund [Not implemented]</div>
                 <div class="big-text">GROSS</div>
                 <div class="label">Before fees are applied (e.g. management fees)</div>
             </div>
@@ -178,7 +178,7 @@ html_code = """
             <div class="arrow"></div>
             
             <div class="box axsa">
-                <div class="title">🏦 AXSA Fund</div>
+                <div class="title">🏦 AXSA Fund (AXSA GROSS)</div>
                 <div class="big-text">NET</div>
                 <div class="label">Master Fund fees are applied (yet to apply AXSA-level fees)</div>
             </div>
@@ -215,11 +215,14 @@ components.html(html_code, height=650, scrolling=True)
 col1, col2 = st.columns(2)
 
 with col1:
-    data_type = st.radio("Gross or Net?", ["Gross", "Net"])
+    data_type = st.radio("What are you trying to calculate? [Only Net (AXSA Gross)]", ["Gross", "Net"])
     mgmt_fee = st.number_input("Management Fee %", 0.0, 10.0, 2.0, 0.1)
-
-with col2:
     carry_pct = st.number_input("Carry %", 0.0, 50.0, 20.0, 0.5)
+    
+    
+with col2:
+    pfm_fee = st.number_input("Performance Fee %", 0.0, 10.0, 2.0, 0.1)
+    pfm_freq = st.selectbox("Performance Fees Frequency",["Monthly", "Quarterly", "Yearly"])
     hurdle_rate = st.number_input("Hurdle Rate %", 0.0, 20.0, 8.0, 0.1)
     use_hwm = st.checkbox("High Water Mark", value=False)
 
