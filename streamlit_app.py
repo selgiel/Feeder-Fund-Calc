@@ -5,12 +5,16 @@ import numpy as np
 import streamlit.components.v1 as components
 from datetime import datetime
 
+
 st.set_page_config(page_title="FoF Calculator", layout="wide")
+
 
 st.title("Investment Fund Fee Calculator")
 
+
 # Parameters always visible
 st.subheader("💰 Fund Fee Mechanism")
+
 
 # STATIC DIAGRAM
 html_code = """
@@ -28,6 +32,7 @@ html_code = """
             background-color: transparent;
         }
 
+
         .container { 
             background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); 
             padding: 20px; 
@@ -38,6 +43,7 @@ html_code = """
             margin: 0 auto;
         }
 
+
         .flowchart { 
             display: flex; 
             flex-direction: row; 
@@ -47,6 +53,7 @@ html_code = """
             padding: 20px 0;
             width: 100%;
         }
+
 
         .box { 
             border: 4px solid; 
@@ -63,9 +70,11 @@ html_code = """
             min-height: 140px;
         }
 
+
         .master { background: linear-gradient(135deg, #4CAF50, #45a049); color: white; border-color: #4CAF50; }
         .axsa { background: linear-gradient(135deg, #2196F3, #1976D2); color: white; border-color: #2196F3; }
         .actual { background: linear-gradient(135deg, #FF9800, #F57C00); color: white; border-color: #FF9800; }
+
 
         .arrow { 
             font-size: 28px; 
@@ -78,16 +87,20 @@ html_code = """
             animation: pulse 2s infinite;
         }
 
+
         .arrow::before { content: "➜"; }
+
 
         @keyframes pulse { 
             0%, 100% { opacity: 1; transform: scale(1); } 
             50% { opacity: 0.6; transform: scale(1.1); } 
         }
 
+
         .title { font-size: 16px; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
         .big-text { font-size: 28px; font-weight: 900; line-height: 1; margin: 5px 0; }
         .label { font-size: 13px; opacity: 0.9; font-weight: 500; }
+
 
         .mechanism { 
             margin-top: 20px; 
@@ -96,6 +109,7 @@ html_code = """
             border-radius: 15px; 
             border: 1px solid rgba(0,0,0,0.05);
         }
+
 
         .mechanism h3 { 
             text-align: center; 
@@ -113,6 +127,7 @@ html_code = """
             line-height: 1.4;
         }
 
+
         .grid-list {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -121,6 +136,7 @@ html_code = """
             padding: 0;
             margin: 0;
         }
+
 
         .grid-list li {
             background: white;
@@ -132,12 +148,14 @@ html_code = """
             box-shadow: 0 2px 5px rgba(0,0,0,0.03);
         }
 
+
         .grid-list li::before {
             content: "✓";
             color: #10b981;
             font-weight: bold;
             margin-right: 10px;
         }
+
 
         @media (max-width: 800px) {
             .flowchart { 
@@ -200,11 +218,15 @@ html_code = """
 </html>
 """
 
+
 components.html(html_code, height=650, scrolling=True)
+
 
 st.subheader('This application converts **gross values** to **net values** based on the inputs below:')
 
+
 col1, col2 = st.columns(2)
+
 
 with col1:
     # data_type = st.radio("Gross or Net?", ["Gross", "Net"])
@@ -217,8 +239,10 @@ with col2:
     hurdle_rate = st.number_input("Hurdle Rate % (Annual)", 0.0, 20.0, 0.0, 0.1)
     use_hwm = st.checkbox("High Water Mark", value=True)
 
+
 # File upload
 uploaded_file = st.file_uploader("Upload Excel (2 cols: Month, Gross/Net %)", type=['xlsx', 'xls'])
+
 
 if uploaded_file is not None:
     try:
@@ -242,6 +266,14 @@ if uploaded_file is not None:
                 st.error("❌ Cannot parse returns column. Expected numbers or % (e.g., 7.89 or 7.89%)")
             else:
                 if st.button("🚀 Calculate", type="primary"):
+                    # ✅ FIX 1: Detect and handle base row (first row with 0 or NaN return)
+                    start_idx = 0
+                    
+                    # Check if first row is a base row (0 or NaN return)
+                    if pd.isna(returns_decimal.iloc[0]) or abs(returns_decimal.iloc[0]) < 0.0001:
+                        st.info(f"ℹ️ Detected base row: {df[period_col].iloc[0]} - Starting calculations from next row")
+                        start_idx = 1
+                    
                     # Initialize
                     starting_value = 1.0
                     current_value = starting_value
@@ -272,6 +304,7 @@ if uploaded_file is not None:
                     carry_decimal = carry_pct / 100
                     
                     # Storage lists
+                    months = []
                     beginning_values = []
                     gross_values = []
                     mgmt_fees = []
@@ -283,8 +316,24 @@ if uploaded_file is not None:
                     return_pcts = []
                     hwm_list = []
                     
-                    # Process each period
-                    for idx, gross_return in enumerate(returns_decimal):
+                    # ✅ FIX 2: Add base row to results if detected
+                    if start_idx == 1:
+                        months.append(df[period_col].iloc[0])
+                        beginning_values.append(starting_value)
+                        gross_values.append(starting_value)
+                        mgmt_fees.append(0.0)
+                        mgmt_charged_list.append(False)
+                        after_mgmt_values.append(starting_value)
+                        perf_fee_base_list.append(0.0)
+                        perf_fees.append(0.0)
+                        ending_net_values.append(starting_value)
+                        return_pcts.append(0.0)
+                        hwm_list.append(hwm)
+                    
+                    # ✅ FIX 3: Process each period starting from start_idx
+                    for idx in range(start_idx, len(returns_decimal)):
+                        gross_return = returns_decimal.iloc[idx]
+                        
                         if pd.isna(gross_return):
                             continue
                         
@@ -294,10 +343,11 @@ if uploaded_file is not None:
                             current_month = month_dt.month
                             is_year_end = current_month == 12
                         except:
-                            current_month = (idx % 12) + 1
+                            current_month = ((idx - start_idx) % 12) + 1
                             is_year_end = current_month == 12
                         
-                        # Store beginning value (Column U in Excel)
+                        # Store month and beginning value (Column U in Excel)
+                        months.append(df[period_col].iloc[idx])
                         beginning_value = current_value
                         beginning_values.append(beginning_value)
                         
@@ -344,14 +394,14 @@ if uploaded_file is not None:
                                 if value_after_mgmt > hwm:
                                     perf_fee_base = value_after_mgmt - hwm
                                     perf_fee_paid = perf_fee_base * carry_decimal
-                                    value_after_mgmt -= perf_fee_paid  # ✅ DEDUCT BEFORE STORING
+                                    value_after_mgmt -= perf_fee_paid
                                     hwm = value_after_mgmt
                             else:
                                 # Charge on excess over hurdle
                                 if period_return > hurdle_period:
                                     excess_return = period_return - hurdle_period
                                     perf_fee_paid = current_value * excess_return * carry_decimal
-                                    value_after_mgmt -= perf_fee_paid  # ✅ DEDUCT BEFORE STORING
+                                    value_after_mgmt -= perf_fee_paid
                         
                         perf_fees.append(perf_fee_paid)
                         perf_fee_base_list.append(perf_fee_base)
@@ -360,8 +410,7 @@ if uploaded_file is not None:
                         net_value = value_after_mgmt
                         ending_net_values.append(net_value)
                         
-                        # Step 7: ✅ CRITICAL FIX - Calculate return % using NET VALUE (after all fees)
-                        # Excel formula: (Column AB - Column U) / Column U
+                        # Step 7: Calculate return % using Excel formula: (AB - U) / U
                         return_pct = ((net_value - beginning_value) / beginning_value * 100) if beginning_value > 0 else 0
                         return_pcts.append(return_pct)
                         
@@ -373,19 +422,20 @@ if uploaded_file is not None:
                     
                     # Create results DataFrame
                     result_df = pd.DataFrame({
-                        'Month': df[period_col].iloc[:len(beginning_values)],
-                        'Input': returns_decimal.iloc[:len(beginning_values)],
-                        'Gross': [v for v in gross_values],
+                        'Month': months,
+                        'Input': [returns_decimal.iloc[i] if i < len(returns_decimal) else 0.0 for i in range(len(months))],
+
+                        'Gross': gross_values,
                         'Mgmt Fee': mgmt_fees,
                         'Mgmt Charged?': mgmt_charged_list,
-                        'After Mgmt': [v for v in after_mgmt_values],
+                        'After Mgmt': after_mgmt_values,
                         'Hurdle Met': ['✓' if r > hurdle_period else '' for r in 
                                        [(after_mgmt_values[i] - beginning_values[i])/beginning_values[i] 
                                         for i in range(len(after_mgmt_values))]],
                         'Perf Paid': perf_fees,
-                        'Net Value': [v for v in ending_net_values],
+                        'Net Value': ending_net_values,
                         'Return %': return_pcts,
-                        'HWM': [v for v in hwm_list]
+                        'HWM': hwm_list
                     })
                     
                     # Display results
@@ -408,9 +458,9 @@ if uploaded_file is not None:
                         final_value = ending_net_values[-1]
                         st.metric("Final Net Value", f"{final_value:.6f}")
                     
-                    # Download
+                    # ✅ FIX 4: Download - Use openpyxl instead of xlsxwriter
                     output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
                         result_df.to_excel(writer, index=False, sheet_name='Results')
                         
                         # Add summary sheet
@@ -425,9 +475,6 @@ if uploaded_file is not None:
                                     f"{total_perf:.6f}", f"{final_value:.6f}"]
                         })
                         summary_df.to_excel(writer, index=False, sheet_name='Summary')
-                        
-                        worksheet = writer.sheets['Results']
-                        worksheet.set_column('A:Z', 15)
                     
                     st.download_button(
                         "📥 Download Excel",
@@ -451,13 +498,16 @@ else:
     - **Column 1**: Month (e.g. 2020-01-31)
     - **Column 2**: Gross Returns (e.g., 7.86% or 0.0786)
     
+    **Note**: If your first row is a base/starting row with 0% return, it will be automatically detected.
+    
     Example:
     """)
     
     example_df = pd.DataFrame({
-        'Month': ['2020-01-31', '2020-02-29', '2020-03-31', '2020-04-30'],
-        'Gross': ['7.86%', '-4.98%', '-8.09%', '21.02%']
+        'Month': ['2019-12-31', '2020-01-31', '2020-02-29', '2020-03-31'],
+        'Gross': ['0%', '7.86%', '-4.98%', '-8.09%']
     })
     st.dataframe(example_df)
+
 
 st.markdown("**Tip**: Returns should be in % format (7.86%) or decimal (0.0786)")
