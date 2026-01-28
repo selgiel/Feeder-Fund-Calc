@@ -202,10 +202,12 @@ html_code = """
 
 components.html(html_code, height=650, scrolling=True)
 
+st.subheader('This application converts **gross values** to **net values** based on the inputs below:')
+
 col1, col2 = st.columns(2)
 
 with col1:
-    data_type = st.radio("Gross or Net?", ["Gross", "Net"])
+    # data_type = st.radio("Gross or Net?", ["Gross", "Net"])
     mgmt_fee = st.number_input("Management Fee % (Annual)", 0.0, 10.0, 1.5, 0.1)
     carry_pct = st.number_input("Carry %", 0.0, 50.0, 10.0, 0.5)
     
