@@ -5,6 +5,7 @@ import numpy as np
 import streamlit.components.v1 as components
 from datetime import datetime
 
+
 st.set_page_config(page_title="FoF Calculator", layout="wide")
 
 st.title("Investment Fund Fee Calculator")
@@ -185,12 +186,12 @@ html_code = """
         </div>
         
         <div class="mechanism">
-            <h3>🔄 Fee Flow Mechanism (Bellator Method)</h3>
+            <h3>🔄 Fee Flow Mechanism</h3>
             <ul class="grid-list">
                 <li><b>Management Fee %</b>: Annual fee on AUM</li>
                 <li><b>Management Fee Frequency</b>: How often management fee is charged</li>
                 <li><b>Carry %</b>: Performance fee on profits</li>
-                <li><b>Add-Back Method</b>: Previous month's uncrystallized fees added back to GAV</li>
+                <li><b>Performance Fee Frequency</b>: How often carry is calculated</li>
                 <li><b>Hurdle Rate %</b>: Minimum return threshold before performance fees apply</li>
                 <li><b>High Water Mark</b>: Benchmark for performance fees</li>
             </ul>
@@ -202,23 +203,27 @@ html_code = """
 
 components.html(html_code, height=650, scrolling=True)
 
-st.subheader('This application converts **gross values** to **net values**:')
+
+st.subheader('This application converts **gross values** to **net values** based on the inputs below:')
+
 
 col1, col2 = st.columns(2)
 
 with col1:
+    # data_type = st.radio("Gross or Net?", ["Gross", "Net"])
     mgmt_fee = st.number_input("Management Fee % (Annual)", 0.0, 10.0, 1.5, 0.1)
     carry_pct = st.number_input("Carry %", 0.0, 50.0, 10.0, 0.5)
-    mgmt_freq = st.selectbox("Management Fee Frequency", ["Monthly", "Quarterly", "Yearly"], index=0)
     
 with col2:
-    pfm_freq = st.selectbox("Performance Fee Calculation Frequency", ["Monthly", "Quarterly", "Yearly"], index=0)
-    crystal_freq = st.selectbox("Crystallization Frequency", ["Monthly", "Quarterly", "Yearly"], index=2, help="When performance fees are actually paid out")
+    mgmt_freq = st.selectbox("Management Fee Frequency", ["Monthly", "Quarterly", "Yearly"], index=0)
+    pfm_freq = st.selectbox("Performance Fee Frequency", ["Monthly", "Quarterly", "Yearly"], index=1)  # Quarterly
     hurdle_rate = st.number_input("Hurdle Rate % (Annual)", 0.0, 20.0, 0.0, 0.1)
     use_hwm = st.checkbox("High Water Mark", value=True)
 
+
 # File upload
-uploaded_file = st.file_uploader("Upload Excel (2 cols: Month, Gross %)", type=['xlsx', 'xls'])
+uploaded_file = st.file_uploader("Upload Excel (2 cols: Month, Gross/Net %)", type=['xlsx', 'xls'])
+
 
 if uploaded_file is not None:
     try:
@@ -229,10 +234,11 @@ if uploaded_file is not None:
         if len(df.columns) >= 2:
             period_col, returns_col = df.columns[0], df.columns[1]
             
-            # Parse returns
+            # Parse returns (handles % strings like "7.89%")
             def parse_returns(series):
                 cleaned = series.astype(str).str.rstrip('%').str.strip()
                 numeric = pd.to_numeric(cleaned, errors='coerce')
+                # If values > 1, assume percentage
                 return numeric.apply(lambda x: x / 100 if pd.notna(x) and abs(x) > 1 else x)
             
             returns_decimal = parse_returns(df[returns_col])
@@ -241,8 +247,10 @@ if uploaded_file is not None:
                 st.error("❌ Cannot parse returns column. Expected numbers or % (e.g., 7.89 or 7.89%)")
             else:
                 if st.button("🚀 Calculate", type="primary"):
+                    # ✅ FIX 1: Detect and handle base row (first row with 0 or NaN return)
                     start_idx = 0
                     
+                    # Check if first row is a base row (0 or NaN return)
                     if pd.isna(returns_decimal.iloc[0]) or abs(returns_decimal.iloc[0]) < 0.0001:
                         st.info(f"ℹ️ Detected base row: {df[period_col].iloc[0]} - Starting calculations from next row")
                         start_idx = 1
@@ -251,60 +259,66 @@ if uploaded_file is not None:
                     starting_value = 1.0
                     current_value = starting_value
                     hwm = starting_value
-                    prev_perf_accrual = 0.0  # Track previous period's uncrystallized perf fee
                     
-                    # Calculate management fee rate (monthly basis)
-                    mgmt_fee_monthly = mgmt_fee / 100 / 12
+                    # Calculate management fee rate
+                    if mgmt_freq == "Monthly":
+                        mgmt_fee_rate = -(mgmt_fee / 100 / 12)
+                        mgmt_periods_per_year = 12
+                    elif mgmt_freq == "Quarterly":
+                        mgmt_fee_rate = -(mgmt_fee / 100 / 4)
+                        mgmt_periods_per_year = 4
+                    else:  # Yearly
+                        mgmt_fee_rate = -(mgmt_fee / 100)
+                        mgmt_periods_per_year = 1
                     
-                    # Calculate hurdle rate (monthly basis)
-                    hurdle_monthly = hurdle_rate / 100 / 12
+                    # Calculate hurdle rate
+                    if pfm_freq == "Monthly":
+                        hurdle_period = hurdle_rate / 100 / 12
+                        perf_periods_per_year = 12
+                    elif pfm_freq == "Quarterly":
+                        hurdle_period = hurdle_rate / 100 / 4
+                        perf_periods_per_year = 4
+                    else:  # Yearly
+                        hurdle_period = hurdle_rate / 100
+                        perf_periods_per_year = 1
                     
                     carry_decimal = carry_pct / 100
                     
                     # Storage lists
                     months = []
                     beginning_values = []
-                    gross_returns = []
-                    pnl_values = []
-                    addback_perf = []
-                    adjusted_gav = []
+                    gross_values = []
                     mgmt_fees = []
                     mgmt_charged_list = []
                     after_mgmt_values = []
-                    perf_accrual_list = []
-                    incremental_perf_list = []
-                    cumulative_uncryst_list = []
-                    perf_crystallized = []
-                    crystallized_list = []
+                    perf_fee_base_list = []
+                    perf_fees = []
                     ending_net_values = []
                     return_pcts = []
                     hwm_list = []
                     
+                    # ✅ FIX 2: Add base row to results if detected
                     if start_idx == 1:
                         months.append(df[period_col].iloc[0])
                         beginning_values.append(starting_value)
-                        gross_returns.append(0.0)
-                        pnl_values.append(0.0)
-                        addback_perf.append(0.0)
-                        adjusted_gav.append(starting_value)
+                        gross_values.append(starting_value)
                         mgmt_fees.append(0.0)
                         mgmt_charged_list.append(False)
                         after_mgmt_values.append(starting_value)
-                        perf_accrual_list.append(0.0)
-                        incremental_perf_list.append(0.0)
-                        cumulative_uncryst_list.append(0.0)
-                        perf_crystallized.append(0.0)
-                        crystallized_list.append(False)
+                        perf_fee_base_list.append(0.0)
+                        perf_fees.append(0.0)
                         ending_net_values.append(starting_value)
                         return_pcts.append(0.0)
                         hwm_list.append(hwm)
                     
+                    # ✅ FIX 3: Process each period starting from start_idx
                     for idx in range(start_idx, len(returns_decimal)):
                         gross_return = returns_decimal.iloc[idx]
                         
                         if pd.isna(gross_return):
                             continue
                         
+                        # Get current month for frequency checking
                         try:
                             month_dt = pd.to_datetime(df[period_col].iloc[idx])
                             current_month = month_dt.month
@@ -313,24 +327,16 @@ if uploaded_file is not None:
                             current_month = ((idx - start_idx) % 12) + 1
                             is_year_end = current_month == 12
                         
-                        # Store month and beginning value
+                        # Store month and beginning value (Column U in Excel)
                         months.append(df[period_col].iloc[idx])
                         beginning_value = current_value
                         beginning_values.append(beginning_value)
-                        gross_returns.append(gross_return)
                         
-                        # Step 1: Calculate P&L (Before Management Fees)
-                        pnl = current_value * gross_return
-                        pnl_values.append(pnl)
+                        # Step 1: Calculate gross value
+                        gross_value = current_value * (1 + gross_return)
+                        gross_values.append(gross_value)
                         
-                        # Step 2: Add Back Previous Uncrystallised Performance Fee
-                        addback_perf.append(prev_perf_accrual)
-                        
-                        # Step 3: Adjusted GAV = Opening + P&L + Add Back
-                        adj_gav = current_value + pnl + prev_perf_accrual
-                        adjusted_gav.append(adj_gav)
-                        
-                        # Step 4: Apply management fee
+                        # Step 2: Apply management fee
                         mgmt_charged = False
                         if mgmt_freq == "Monthly":
                             mgmt_charged = True
@@ -339,89 +345,77 @@ if uploaded_file is not None:
                         elif mgmt_freq == "Yearly":
                             mgmt_charged = is_year_end
                         
-                        mgmt_fee_amount = adj_gav * mgmt_fee_monthly if mgmt_charged else 0.0
-                        after_mgmt = adj_gav - mgmt_fee_amount
+                        mgmt_fee_applied = mgmt_fee_rate if mgmt_charged else 0.0
+                        value_after_mgmt = current_value * (1 + gross_return + mgmt_fee_applied)
                         
+                        mgmt_fee_amount = abs(mgmt_fee_applied * current_value) if mgmt_charged else 0.0
                         mgmt_fees.append(mgmt_fee_amount)
                         mgmt_charged_list.append(mgmt_charged)
-                        after_mgmt_values.append(after_mgmt)
+                        after_mgmt_values.append(value_after_mgmt)
                         
-                        # Step 5: Calculate Performance Fee Accrual (EVERY MONTH)
-                        perf_accrual = 0.0
+                        # Step 3: Calculate period return after mgmt
+                        period_return = (value_after_mgmt - current_value) / current_value if current_value > 0 else 0
                         
-                        if use_hwm:
-                            if after_mgmt > hwm:
-                                perf_accrual = (after_mgmt - hwm) * carry_decimal
-                        else:
-                            period_return = (after_mgmt - current_value) / current_value if current_value > 0 else 0
-                            if period_return > hurdle_monthly:
-                                excess_return = period_return - hurdle_monthly
-                                perf_accrual = current_value * excess_return * carry_decimal
+                        # Step 4: Check if performance fee should be calculated
+                        should_calc_perf = False
+                        if pfm_freq == "Yearly":
+                            should_calc_perf = is_year_end
+                        elif pfm_freq == "Quarterly":
+                            should_calc_perf = current_month in [3, 6, 9, 12]
+                        elif pfm_freq == "Monthly":
+                            should_calc_perf = True
                         
-                        perf_accrual_list.append(perf_accrual)
+                        # Step 5: Calculate performance fee
+                        perf_fee_paid = 0.0
+                        perf_fee_base = 0.0
                         
-                        # Step 6: Calculate incremental change
-                        incremental = perf_accrual - prev_perf_accrual
-                        incremental_perf_list.append(incremental)
-                        
-                        # Step 7: Check if performance fee should be CRYSTALLIZED
-                        should_crystallize = False
-                        if crystal_freq == "Yearly":
-                            should_crystallize = is_year_end
-                        elif crystal_freq == "Quarterly":
-                            should_crystallize = current_month in [3, 6, 9, 12]
-                        elif crystal_freq == "Monthly":
-                            should_crystallize = True
-                        
-                        perf_paid = 0.0
-                        cumulative_uncrystallized = perf_accrual  # Always show current accrual
-                        
-                        if should_crystallize and perf_accrual > 0:
-                            perf_paid = perf_accrual
+                        if should_calc_perf:
                             if use_hwm:
-                                hwm = after_mgmt  # Update HWM to after_mgmt (before deducting perf fee)
-                            cumulative_uncrystallized = 0.0  # Reset after crystallization
-                            prev_perf_accrual = 0.0  # Reset for next period
-                        else:
-                            # Store for next period's add-back
-                            prev_perf_accrual = perf_accrual
+                                # Only charge if value > HWM
+                                if value_after_mgmt > hwm:
+                                    perf_fee_base = value_after_mgmt - hwm
+                                    perf_fee_paid = perf_fee_base * carry_decimal
+                                    value_after_mgmt -= perf_fee_paid
+                                    hwm = value_after_mgmt
+                            else:
+                                # Charge on excess over hurdle
+                                if period_return > hurdle_period:
+                                    excess_return = period_return - hurdle_period
+                                    perf_fee_paid = current_value * excess_return * carry_decimal
+                                    value_after_mgmt -= perf_fee_paid
                         
-                        perf_crystallized.append(perf_paid)
-                        crystallized_list.append(should_crystallize)
-                        cumulative_uncryst_list.append(cumulative_uncrystallized)
+                        perf_fees.append(perf_fee_paid)
+                        perf_fee_base_list.append(perf_fee_base)
                         
-                        # Step 8: Final Net Value = After Mgmt - Crystallized Perf Fee
-                        final_net = after_mgmt - perf_paid
-                        ending_net_values.append(final_net)
+                        # Step 6: Final net value (Column AB in Excel) - AFTER perf fee deduction
+                        net_value = value_after_mgmt
+                        ending_net_values.append(net_value)
                         
-                        # Step 9: Calculate return %
-                        return_pct = ((final_net - beginning_value) / beginning_value * 100) if beginning_value > 0 else 0
+                        # Step 7: Calculate return % using Excel formula: (AB - U) / U
+                        return_pct = ((net_value - beginning_value) / beginning_value * 100) if beginning_value > 0 else 0
                         return_pcts.append(return_pct)
                         
                         # Store HWM
                         hwm_list.append(hwm)
                         
                         # Update for next iteration
-                        current_value = final_net
+                        current_value = net_value
                     
                     # Create results DataFrame
                     result_df = pd.DataFrame({
                         'Month': months,
-                        'Input Return %': [r * 100 for r in gross_returns],
-                        'Beginning NAV': beginning_values,
-                        'P&L (Before Mgmt)': pnl_values,
-                        'Add Back Uncryst PF': addback_perf,
-                        'Adjusted GAV': adjusted_gav,
+                        'Input': [returns_decimal.iloc[i] if i < len(returns_decimal) else 0.0 for i in range(len(months))],
+
+                        'Gross': gross_values,
                         'Mgmt Fee': mgmt_fees,
                         'Mgmt Charged?': mgmt_charged_list,
-                        'After Mgmt (Gross for PF)': after_mgmt_values,
-                        'Perf Fee Accrued (Monthly)': perf_accrual_list,
-                        'Incremental Perf Fee': incremental_perf_list,
-                        'Cumulative Uncryst PF': cumulative_uncryst_list,
-                        'Crystallized?': crystallized_list,
-                        'Perf Fee Paid': perf_crystallized,
-                        'Closing NAV': ending_net_values,
-                        'Net Return %': return_pcts,
+                        'After Mgmt': after_mgmt_values,
+                        'Hurdle Met': ['✓' if r > hurdle_period else '' for r in 
+                                       [(after_mgmt_values[i] - beginning_values[i])/beginning_values[i] 
+                                        for i in range(len(after_mgmt_values))]],
+                        'Perf Paid': perf_fees,
+                        'Net Value': ending_net_values,
+                        'Return %': return_pcts,
                         'HWM': hwm_list
                     })
                     
@@ -431,44 +425,42 @@ if uploaded_file is not None:
                     
                     # Summary
                     st.subheader("📊 Summary Statistics")
-                    c1, c2, c3, c4, c5 = st.columns(5)
+                    c1, c2, c3, c4 = st.columns(4)
                     with c1:
-                        avg_return = result_df['Net Return %'].mean()
-                        st.metric("Avg Net Return %", f"{avg_return:.2f}%")
+                        avg_return = result_df['Return %'].mean()
+                        st.metric("Avg Return %", f"{avg_return:.2f}%")
                     with c2:
                         total_mgmt = sum(mgmt_fees)
                         st.metric("Total Mgmt Fees", f"{total_mgmt:.6f}")
                     with c3:
-                        total_perf = sum(perf_crystallized)
-                        st.metric("Total Perf Fees Paid", f"{total_perf:.6f}")
+                        total_perf = sum(perf_fees)
+                        st.metric("Total Perf Fees", f"{total_perf:.6f}")
                     with c4:
-                        current_uncryst = cumulative_uncryst_list[-1] if cumulative_uncryst_list else 0
-                        st.metric("Uncrystallized PF", f"{current_uncryst:.6f}")
-                    with c5:
                         final_value = ending_net_values[-1]
-                        st.metric("Final NAV", f"{final_value:.6f}")
+                        st.metric("Final Net Value", f"{final_value:.6f}")
                     
-                    # Download
+                    # ✅ FIX 4: Download - Use openpyxl instead of xlsxwriter
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
                         result_df.to_excel(writer, index=False, sheet_name='Results')
                         
+                        # Add summary sheet
                         summary_df = pd.DataFrame({
-                            'Parameter': ['Method', 'Management Fee', 'Mgmt Frequency', 'Performance Fee', 
-                                        'Perf Calc Frequency', 'Crystallization Frequency', 'Hurdle Rate', 'High Water Mark', 
-                                        '', 'Avg Net Return %', 'Total Mgmt Fees', 'Total Perf Fees', 
-                                        'Uncrystallized PF', 'Final NAV'],
-                            'Value': ['Bellator Add-Back', f"{mgmt_fee}%", mgmt_freq, f"{carry_pct}%", 
-                                    pfm_freq, crystal_freq, f"{hurdle_rate}%", 'Yes' if use_hwm else 'No',
+                            'Parameter': ['Management Fee', 'Mgmt Frequency', 'Performance Fee', 
+                                        'Perf Frequency', 'Hurdle Rate', 'High Water Mark', 
+                                        '', 'Avg Return %', 'Total Mgmt Fees', 'Total Perf Fees', 
+                                        'Final Net Value'],
+                            'Value': [f"{mgmt_fee}%", mgmt_freq, f"{carry_pct}%", 
+                                    pfm_freq, f"{hurdle_rate}%", 'Yes' if use_hwm else 'No',
                                     '', f"{avg_return:.2f}%", f"{total_mgmt:.6f}", 
-                                    f"{total_perf:.6f}", f"{current_uncryst:.6f}", f"{final_value:.6f}"]
+                                    f"{total_perf:.6f}", f"{final_value:.6f}"]
                         })
                         summary_df.to_excel(writer, index=False, sheet_name='Summary')
                     
                     st.download_button(
                         "📥 Download Excel",
                         output.getvalue(),
-                        f"fund_fees_bellator_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        f"fund_fees_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
         else:
@@ -487,6 +479,8 @@ else:
     - **Column 1**: Month (e.g. 2020-01-31)
     - **Column 2**: Gross Returns (e.g., 7.86% or 0.0786)
     
+    **Note**: If your first row is a base/starting row with 0% return, it will be automatically detected.
+    
     Example:
     """)
     
@@ -495,5 +489,6 @@ else:
         'Gross': ['0%', '7.86%', '-4.98%', '-8.09%']
     })
     st.dataframe(example_df)
+
 
 st.markdown("**Tip**: Returns should be in % format (7.86%) or decimal (0.0786)")
